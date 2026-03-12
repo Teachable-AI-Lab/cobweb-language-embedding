@@ -13,6 +13,7 @@ class CobwebWrapper:
         self.sentences = []
         self.sentence_to_node = {}
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.max_init_search = 100000
         if corpus is None and corpus_embeddings is None and not empty_wrapper:
             raise ValueError("Provide at least one of corpus, corpus_embeddings, or set empty_wrapper=True.")
         elif not empty_wrapper:
@@ -22,11 +23,11 @@ class CobwebWrapper:
     def init_tree(self, corpus, corpus_embeddings):
         if corpus_embeddings is not None:
             corpus_embeddings = torch.tensor(corpus_embeddings)
-            embedding_shape = embedding_shape if embedding_shape is not None else corpus_embeddings.shape[1:]
-        elif embedding_shape is None:
-            raise ValueError("Provide either corpus_embeddings or embedding_shape.")
+            embedding_shape = corpus_embeddings.shape[1:]
+        else:
+            raise ValueError("Provide corpus_embeddings when initializing the tree.")
 
-        self.tree = CobwebTorchTree(shape=embedding_shape, device=self.device, use_info=True, acuity_cutoff=False, use_kl=True, alpha=1e-8)
+        self.tree = CobwebTorchTree(shape=embedding_shape, device=self.device, use_info=True, acuity_cutoff=False, use_kl=True)
 
         if corpus is not None and len(corpus) > 0 and corpus_embeddings is not None:
             self.add_sentences(corpus, corpus_embeddings)

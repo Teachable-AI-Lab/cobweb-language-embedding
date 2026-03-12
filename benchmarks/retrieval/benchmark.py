@@ -199,7 +199,7 @@ def parse_args() -> argparse.Namespace:
 
 def methods_for(mode: str) -> list[str]:
     if mode == "all":
-        return ["faiss", "torch", "faiss_pre", "torch_pre", "cobweb", "cobweb_pre"]
+        return ["faiss", "faiss_pre", "cobweb", "cobweb_pre"]
     if mode == "scale":
         return ["faiss", "cobweb_pre"]
     if mode == "cobweb":
@@ -232,8 +232,6 @@ def main() -> None:
 
     corpus_embs = model.encode(data.corpus, convert_to_numpy=True, show_progress_bar=True)
     query_embs = model.encode(data.queries, convert_to_numpy=True, show_progress_bar=True)
-    corpus_embs = _normalize(corpus_embs)
-    query_embs = _normalize(query_embs)
 
     dim = min(args.target_dim, corpus_embs.shape[1])
     steps = fit_preprocessor(
@@ -241,8 +239,8 @@ def main() -> None:
         n_components=dim,
         use_whitening=args.use_whitening,
     )
-    corpus_pre = _normalize(apply_preprocessor(corpus_embs, steps)) if steps else corpus_embs
-    query_pre = _normalize(apply_preprocessor(query_embs, steps)) if steps else query_embs
+    corpus_pre = apply_preprocessor(corpus_embs, steps) if steps else corpus_embs
+    query_pre = apply_preprocessor(query_embs, steps) if steps else query_embs
 
     enabled = methods_for(args.method)
     results = []

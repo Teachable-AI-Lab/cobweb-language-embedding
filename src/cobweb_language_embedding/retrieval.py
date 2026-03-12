@@ -9,10 +9,9 @@ class CobwebRetriever(CobwebWrapper):
     def __init__(self, corpus=None, corpus_embeddings=None, cobweb_wrapper = None):
         if corpus is None and corpus_embeddings is None and cobweb_wrapper is None:
             raise ValueError("Must provide either corpus/corpus_embeddings or an existing CobwebWrapper.")
-        empty_wrapper = cobweb_wrapper is not None
-        super().__init__(corpus, corpus_embeddings, empty_wrapper=empty_wrapper)
-        if cobweb_wrapper is not None:
-            self.tree = cobweb_wrapper.tree
+
+        # Initialize cache fields before super().__init__ so calls to
+        # _invalidate_prediction_index during tree construction are safe.
         self._prediction_index_valid = False
         self._index_to_node = {}
         self._node_means = None
@@ -20,6 +19,11 @@ class CobwebRetriever(CobwebWrapper):
         self._leaf_to_path_indices = None
         self._path_matrix = None
         self.max_depth = 0
+
+        empty_wrapper = cobweb_wrapper is not None
+        super().__init__(corpus, corpus_embeddings, empty_wrapper=empty_wrapper)
+        if cobweb_wrapper is not None:
+            self.tree = cobweb_wrapper.tree
 
     def query(self, embedding, k=5, return_ids=False, use_indexed=False):
         """Query the Cobweb tree for top-k similar sentences to the embedding."""
