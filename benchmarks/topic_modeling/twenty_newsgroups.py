@@ -1,4 +1,4 @@
-"""20 Newsgroups dataset loader compatible with BERTopic experiments."""
+"""20 Newsgroups dataset loader compatible with CobwebTM experiments."""
 
 from __future__ import annotations
 
@@ -6,11 +6,11 @@ from typing import List, Optional, Sequence
 
 from sklearn.datasets import fetch_20newsgroups
 
-from .bertopic_utils import BERTopicDataset
+from .cobwebtm_utils import CobwebTMDataset
 
 
-class TwentyNewsgroupsDataset(BERTopicDataset):
-    """Load 20 Newsgroups into a BERTopicDataset."""
+class TwentyNewsgroupsDataset(CobwebTMDataset):
+    """Load 20 Newsgroups into a CobwebTMDataset."""
 
     @classmethod
     def load(

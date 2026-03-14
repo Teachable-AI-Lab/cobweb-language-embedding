@@ -1,4 +1,4 @@
-"""Hierarchical BERTopic runner and utilities."""
+"""Hierarchical CobwebTM runner and utilities."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ import numpy as np
 import pandas as pd
 from bertopic import BERTopic
 
-from cobweb_language_embedding.topic_modeling import BERTopicHierarchicalWrapper
-from .bertopic_utils import BERTopicDataset
+from cobweb_language_embedding.topic_modeling import CobwebTMHierarchical
+from .cobwebtm_utils import CobwebTMDataset
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +119,104 @@ def compute_hierarchical_affinity(relations: List[Tuple[np.ndarray, np.ndarray]]
     return child_aff, non_child_aff
 
 
+def compute_clnpmi(child_topic: np.ndarray, parent_topic: np.ndarray, doc_word: np.ndarray) -> float:
+    """Compute CLNPMI between child and parent topic distributions."""
+    if child_topic.size == 0 or parent_topic.size == 0 or doc_word.size == 0:
+        return 0.0
+
+    def _clnpmi_pair(c_vec, p_vec):
+        doc_n = doc_word.shape[0]
+        vals = []
+        for N in [5, 10, 15]:
+            k_c = min(N, c_vec.size)
+            k_p = min(N, p_vec.size)
+            idx_c_full = np.argpartition(c_vec, -k_c)[-k_c:]
+            idx_p_full = np.argpartition(p_vec, -k_p)[-k_p:]
+            set_c = set(int(x) for x in idx_c_full)
+            set_p = set(int(x) for x in idx_p_full)
+            idx_c = [w for w in set_c if w not in set_p]
+            idx_p = [w for w in set_p if w not in set_c]
+            if not idx_c or not idx_p:
+                vals.append(0.0)
+                continue
+            sum_score = 0.0
+            pairs = 0
+            for wi in idx_c:
+                fi = doc_word[:, wi] > 0
+                p_i = float(fi.sum()) / doc_n
+                for wj in idx_p:
+                    fj = doc_word[:, wj] > 0
+                    p_j = float(fj.sum()) / doc_n
+                    p_ij = float((fi & fj).sum()) / doc_n
+                    if p_ij == 1.0:
+                        sum_score += 1.0
+                        pairs += 1
+                    elif p_ij > 0 and p_i > 0 and p_j > 0:
+                        p_ij = p_ij + 1e-10
+                        sum_score += np.log(p_ij / (p_i * p_j)) / (-np.log(p_ij))
+                        pairs += 1
+            vals.append(sum_score / pairs if pairs > 0 else 0.0)
+        return float(np.mean(vals)) if vals else 0.0
+
+    def _normalize_rows(mat):
+        norms = np.linalg.norm(mat, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        return mat / norms
+
+    if child_topic.ndim == 1 and parent_topic.ndim == 1:
+        return _clnpmi_pair(child_topic, parent_topic)
+    if child_topic.ndim == 1 and parent_topic.ndim == 2:
+        child_topic = child_topic[np.newaxis, :]
+    if child_topic.ndim == 2 and parent_topic.ndim == 1:
+        parent_topic = parent_topic[np.newaxis, :]
+
+    C = child_topic
+    P = parent_topic
+    if C.shape[1] != P.shape[1]:
+        V = min(C.shape[1], P.shape[1])
+        C = C[:, :V]
+        P = P[:, :V]
+
+    Cn = _normalize_rows(C.astype(np.float64))
+    Pn = _normalize_rows(P.astype(np.float64))
+    sim = Cn @ Pn.T
+    best = np.argmax(sim, axis=1)
+    scores = [_clnpmi_pair(C[i], P[best[i]]) for i in range(C.shape[0])]
+    return float(np.mean(scores)) if scores else 0.0
+
+
+def compute_topic_pair_difference(words_a: List[str], words_b: List[str]) -> float:
+    """Fraction of words that appear in only one of two topics."""
+    if not words_a and not words_b:
+        return 0.0
+    from collections import Counter
+    c = Counter()
+    c.update(words_a)
+    c.update(words_b)
+    unique_only = sum(1 for v in c.values() if v == 1)
+    denom = len(words_a) + len(words_b)
+    return float(unique_only / denom) if denom > 0 else 0.0
+
+
+def compute_group_td(groups: List[List[List[str]]]) -> float:
+    """Average topic diversity across sibling groups."""
+    if not groups:
+        return 0.0
+    from collections import Counter
+    group_scores = []
+    for topics in groups:
+        flat = []
+        for tw in topics:
+            flat.extend(tw)
+        if not flat:
+            group_scores.append(0.0)
+            continue
+        cnt = Counter(flat)
+        unique_once = sum(1 for v in cnt.values() if v == 1)
+        group_scores.append(float(unique_once / len(flat)))
+    return float(np.mean(group_scores)) if group_scores else 0.0
+
+
 def _get_vocabulary(model: BERTopic) -> List[str]:
     try:
         return list(model.vectorizer_model.get_feature_names_out())
@@ -208,17 +306,17 @@ def _level_nodes(df: pd.DataFrame) -> Dict[int, List[int]]:
     return by_level
 
 
-class BERTopicHierarchicalRunner:
-    """Run BERTopic instances and compute hierarchical metrics."""
+class CobwebTMHierarchicalRunner:
+    """Run CobwebTM instances and compute hierarchical metrics."""
 
     def __init__(self, topic_models: Sequence[BERTopic], *, leaf_level_zero: bool = True, reverse_levels: bool = False):
         if not topic_models:
-            raise ValueError("Provide at least one BERTopic instance to BERTopicHierarchicalRunner")
+            raise ValueError("Provide at least one CobwebTM instance to CobwebTMHierarchicalRunner")
         self.topic_models = list(topic_models)
         self.leaf_level_zero = bool(leaf_level_zero)
         self.reverse_levels = bool(reverse_levels)
 
-    def run(self, dataset: BERTopicDataset, top_n_words: int = 15, max_level: Optional[int] = None):
+    def run(self, dataset: CobwebTMDataset, top_n_words: int = 15, max_level: Optional[int] = None):
         results = []
         for model in self.topic_models:
             topic_assignments = getattr(model, "topics_", None)
@@ -227,9 +325,9 @@ class BERTopicHierarchicalRunner:
                 model.fit(dataset.documents, embeddings=dataset.embeddings)
 
             cobweb_clusterer = getattr(model.hdbscan_model, "clusterer", None)
-            wrapper = BERTopicHierarchicalWrapper(
+            wrapper = CobwebTMHierarchical(
                 docs=dataset.documents,
-                bertopic_model=model,
+                model=model,
                 linkage_function=None,
                 cobweb_clusterer=cobweb_clusterer,
                 topk=top_n_words,
@@ -295,6 +393,63 @@ class BERTopicHierarchicalRunner:
                     relations.append((child_mat, parent_mat))
             child_aff, non_child_aff = compute_hierarchical_affinity(relations) if relations else (float("nan"), float("nan"))
 
+            # CLNPMI across consecutive levels
+            clnpmi_vals = [compute_clnpmi(c, p, doc_word_binary) for (c, p) in relations] if relations else []
+            hier_clnpmi = float(np.mean(clnpmi_vals)) if clnpmi_vals else float("nan")
+
+            # TraCo-inspired metrics: PC_TD, PnonC_TD, Sibling_TD, Sibling clNPMI
+            adj = _build_adjacency(df)
+            node_top_words: Dict[int, List[str]] = {}
+            for lvl in levels_sorted:
+                for idx_n, nid in enumerate(by_level.get(lvl, [])):
+                    node_top_words[nid] = level_topic_words[lvl][idx_n] if idx_n < len(level_topic_words[lvl]) else []
+
+            pc_td_levels = []
+            pnonc_td_levels = []
+            sibling_td_levels = []
+            sibling_clnpmi_levels = []
+            for i_lvl in range(len(levels_sorted) - 1):
+                child_lvl = levels_sorted[i_lvl]
+                parent_lvl = levels_sorted[i_lvl + 1]
+                child_nodes = by_level.get(child_lvl, [])
+                parent_nodes = by_level.get(parent_lvl, [])
+                if not child_nodes or not parent_nodes:
+                    continue
+                child_set = set(child_nodes)
+                pc_scores = []
+                pnonc_scores = []
+                sibling_group_scores = []
+                sibling_group_clnpmi = []
+                for pid in parent_nodes:
+                    children = [c for c in adj.get(pid, []) if c in child_set]
+                    if children:
+                        p_words = node_top_words.get(pid, [])
+                        for cid in children:
+                            pc_scores.append(compute_topic_pair_difference(p_words, node_top_words.get(cid, [])))
+                        group_words = [node_top_words.get(cid, []) for cid in children]
+                        sibling_group_scores.append(compute_group_td([group_words]))
+                        pair_vals = []
+                        for ii in range(len(children)):
+                            for jj in range(ii + 1, len(children)):
+                                d_i = node_dist.get(children[ii], np.zeros(doc_word_counts.shape[1], dtype=np.float32))
+                                d_j = node_dist.get(children[jj], np.zeros(doc_word_counts.shape[1], dtype=np.float32))
+                                pair_vals.append(compute_clnpmi(d_i, d_j, doc_word_binary))
+                        if pair_vals:
+                            sibling_group_clnpmi.append(float(np.mean(pair_vals)))
+                    non_children = [c for c in child_nodes if c not in children]
+                    if non_children:
+                        p_words = node_top_words.get(pid, [])
+                        for cid in non_children:
+                            pnonc_scores.append(compute_topic_pair_difference(p_words, node_top_words.get(cid, [])))
+                if pc_scores:
+                    pc_td_levels.append(float(np.mean(pc_scores)))
+                if pnonc_scores:
+                    pnonc_td_levels.append(float(np.mean(pnonc_scores)))
+                if sibling_group_scores:
+                    sibling_td_levels.append(float(np.mean(sibling_group_scores)))
+                if sibling_group_clnpmi:
+                    sibling_clnpmi_levels.append(float(np.mean(sibling_group_clnpmi)))
+
             metrics = {
                 "hier_coherence_npmi": float(np.mean(npmi_vals)) if npmi_vals else float("nan"),
                 "hier_topic_uniqueness": float(np.mean(tu_vals)) if tu_vals else float("nan"),
@@ -302,6 +457,11 @@ class BERTopicHierarchicalRunner:
                 "hier_topic_specialization": float(np.mean(spec_vals)) if spec_vals else float("nan"),
                 "hier_affinity_child": float(child_aff),
                 "hier_affinity_non_child": float(non_child_aff),
+                "hier_coherence_clnpmi": hier_clnpmi,
+                "hier_PC_TD": float(np.mean(pc_td_levels)) if pc_td_levels else float("nan"),
+                "hier_PnonC_TD": float(np.mean(pnonc_td_levels)) if pnonc_td_levels else float("nan"),
+                "hier_sibling_TD": float(np.mean(sibling_td_levels)) if sibling_td_levels else float("nan"),
+                "hier_sibling_clnpmi": float(np.mean(sibling_clnpmi_levels)) if sibling_clnpmi_levels else float("nan"),
             }
             results.append({"model": model, **metrics})
 

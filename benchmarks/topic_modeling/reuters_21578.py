@@ -1,14 +1,14 @@
-"""Reuters-21578 dataset loader compatible with BERTopic experiments."""
+"""Reuters-21578 dataset loader compatible with CobwebTM experiments."""
 
 from __future__ import annotations
 
 from typing import List, Optional, Sequence
 
-from .bertopic_utils import BERTopicDataset
+from .cobwebtm_utils import CobwebTMDataset
 
 
-class Reuters21578Dataset(BERTopicDataset):
-    """Load Reuters-21578 into a BERTopicDataset."""
+class Reuters21578Dataset(CobwebTMDataset):
+    """Load Reuters-21578 into a CobwebTMDataset."""
 
     @classmethod
     def load(

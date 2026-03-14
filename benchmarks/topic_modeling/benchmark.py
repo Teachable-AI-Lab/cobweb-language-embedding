@@ -1,4 +1,4 @@
-"""CLI entry point to run BERTopic benchmarks for cobweb-language-embedding."""
+"""CLI entry point to run CobwebTM topic modeling benchmarks."""
 
 from __future__ import annotations
 
@@ -21,26 +21,24 @@ if str(REPO_ROOT) not in sys.path:
 
 from bertopic import BERTopic
 from bertopic.vectorizers import ClassTfidfTransformer
-from hdbscan import HDBSCAN
 from sentence_transformers import SentenceTransformer
-from sklearn.cluster import KMeans
 from sklearn.feature_extraction.text import CountVectorizer
 from umap import UMAP
 
-from cobweb_language_embedding.topic_modeling import BERTopicCobwebWrapper
+from cobweb_language_embedding.topic_modeling import CobwebTM
 
 try:
     from .ag_news import AGNewsDataset
-    from .bertopic_utils import BERTopicRunner
-    from .hierarchical_utils import BERTopicHierarchicalRunner
+    from .cobwebtm_utils import CobwebTMRunner
+    from .hierarchical_utils import CobwebTMHierarchicalRunner
     from .reuters_21578 import Reuters21578Dataset
     from .stackexchange import StackExchangeDataset
     from .twenty_newsgroups import TwentyNewsgroupsDataset
 except ImportError:
     # Fallback for direct script execution: `python benchmarks/topic_modeling/benchmark.py`.
     from benchmarks.topic_modeling.ag_news import AGNewsDataset
-    from benchmarks.topic_modeling.bertopic_utils import BERTopicRunner
-    from benchmarks.topic_modeling.hierarchical_utils import BERTopicHierarchicalRunner
+    from benchmarks.topic_modeling.cobwebtm_utils import CobwebTMRunner
+    from benchmarks.topic_modeling.hierarchical_utils import CobwebTMHierarchicalRunner
     from benchmarks.topic_modeling.reuters_21578 import Reuters21578Dataset
     from benchmarks.topic_modeling.stackexchange import StackExchangeDataset
     from benchmarks.topic_modeling.twenty_newsgroups import TwentyNewsgroupsDataset
@@ -49,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 
 class BenchmarkRunner:
-    """Dispatch datasets and run BERTopic benchmarks."""
+    """Dispatch datasets and run CobwebTM benchmarks."""
 
     def __init__(
         self,
@@ -63,7 +61,8 @@ class BenchmarkRunner:
         no_umap: bool = False,
         umap_n_neighbors: int = 15,
         umap_n_components: int = 128,
-        num_clusters: int = 50,
+        cluster_level: int = 5,
+        min_cluster_size: int = 5,
         device: str | None = None,
         runtime_log: str | None = None,
     ):
@@ -77,7 +76,8 @@ class BenchmarkRunner:
         self.no_umap = no_umap
         self.umap_n_neighbors = umap_n_neighbors
         self.umap_n_components = umap_n_components
-        self.num_clusters = num_clusters
+        self.cluster_level = cluster_level
+        self.min_cluster_size = min_cluster_size
         self.device = self._resolve_device(device)
         self.runtime_log = runtime_log
 
@@ -118,21 +118,10 @@ class BenchmarkRunner:
             BERTopic(
                 embedding_model=embedding_model,
                 umap_model=umap_model,
-                hdbscan_model=HDBSCAN(min_cluster_size=self.num_clusters, metric="euclidean"),
-                vectorizer_model=vectorizer_model,
-                ctfidf_model=ctfidf_model,
-            ),
-            BERTopic(
-                embedding_model=embedding_model,
-                umap_model=umap_model,
-                hdbscan_model=KMeans(n_clusters=self.num_clusters),
-                vectorizer_model=vectorizer_model,
-                ctfidf_model=ctfidf_model,
-            ),
-            BERTopic(
-                embedding_model=embedding_model,
-                umap_model=umap_model,
-                hdbscan_model=BERTopicCobwebWrapper(cluster_level=5, min_cluster_size=5),
+                hdbscan_model=CobwebTM(
+                    cluster_level=self.cluster_level,
+                    min_cluster_size=self.min_cluster_size,
+                ),
                 vectorizer_model=vectorizer_model,
                 ctfidf_model=ctfidf_model,
             ),
@@ -179,7 +168,8 @@ class BenchmarkRunner:
             "device": self.device,
             "embedding_seconds": embedding_seconds,
             "total_seconds": total_seconds,
-            "num_clusters": self.num_clusters,
+            "cluster_level": self.cluster_level,
+            "min_cluster_size": self.min_cluster_size,
             "models": model_entries,
         }
 
@@ -191,7 +181,7 @@ class BenchmarkRunner:
         embedding_seconds = self._ensure_embeddings(dataset, embedding_model)
         topic_models = self._build_models(embedding_model)
 
-        runner = BERTopicRunner(topic_models)
+        runner = CobwebTMRunner(topic_models)
         results = runner.run(dataset, top_n_words=self.top_n_words, measure_runtime=True, shared_overhead=embedding_seconds)
 
         for idx, entry in enumerate(results):
@@ -202,7 +192,7 @@ class BenchmarkRunner:
             print(f"Model {idx} ({cluster_name}) metrics: {metrics}")
 
         if self.run_hierarchical:
-            hierarchical_runner = BERTopicHierarchicalRunner(
+            hierarchical_runner = CobwebTMHierarchicalRunner(
                 topic_models,
                 leaf_level_zero=self.leaf_level_zero,
                 reverse_levels=self.reverse_levels,
@@ -219,7 +209,7 @@ class BenchmarkRunner:
 
 
 def parse_args(argv=None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run BERTopic benchmarks")
+    parser = argparse.ArgumentParser(description="Run CobwebTM benchmarks")
     parser.add_argument("dataset", help="Dataset to run: 20newsgroups | reuters | ag_news | stackexchange")
     parser.add_argument("--max-docs", type=int, default=None, help="Optional limit on documents for quick runs")
     parser.add_argument("--top-n-words", type=int, default=15, help="Top-N words per topic for metrics")
@@ -231,7 +221,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--no-umap", action="store_true", help="Disable UMAP dimensionality reduction")
     parser.add_argument("--umap-n-neighbors", type=int, default=20, help="UMAP n_neighbors")
     parser.add_argument("--umap-n-components", type=int, default=512, help="UMAP n_components")
-    parser.add_argument("--num-clusters", type=int, default=20, help="Number of clusters for KMeans/HDBSCAN")
+    parser.add_argument("--cluster-level", type=int, default=5, help="CobwebTM cluster_level parameter")
+    parser.add_argument("--min-cluster-size", type=int, default=5, help="CobwebTM min_cluster_size parameter")
     parser.add_argument("--device", default="auto", help="Torch device (cuda, cpu, auto)")
     parser.add_argument("--runtime-log", default=None, help="Optional path to store runtime metrics JSON")
     return parser.parse_args(argv)
@@ -251,7 +242,8 @@ def main(argv=None):
         no_umap=args.no_umap,
         umap_n_neighbors=args.umap_n_neighbors,
         umap_n_components=args.umap_n_components,
-        num_clusters=args.num_clusters,
+        cluster_level=args.cluster_level,
+        min_cluster_size=args.min_cluster_size,
         device=args.device,
         runtime_log=args.runtime_log,
     )

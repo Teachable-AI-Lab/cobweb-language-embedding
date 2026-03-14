@@ -1,7 +1,7 @@
-"""Minimal BERTopic integration built on top of CobwebWrapper.
+"""CobwebTM topic modeling built on top of CobwebWrapper.
 
-This module intentionally keeps only the pieces needed for BERTopic benchmark
-style usage: a cluster model with ``fit`` and ``predict``.
+This module provides CobwebTM clustering wrappers that integrate with the
+BERTopic framework: a cluster model with ``fit`` and ``predict``.
 """
 
 import math
@@ -20,8 +20,8 @@ from .CPPCobweb import CPPCobwebTree
 from .CobwebWrapper import CobwebWrapper
 
 
-class BERTopicCobwebWrapper(CobwebWrapper):
-	"""BERTopic-compatible clustering wrapper backed by Cobweb."""
+class CobwebTM(CobwebWrapper):
+	"""CobwebTM clustering wrapper backed by Cobweb."""
 
 	def __init__(self, cluster_level=4, min_cluster_size=5):
 		super().__init__(corpus=None, corpus_embeddings=None, empty_wrapper=True)
@@ -134,7 +134,7 @@ class BERTopicCobwebWrapper(CobwebWrapper):
 		return self.labels_
 
 	def fit(self, x):
-		"""Fit Cobweb on BERTopic-provided embeddings and expose ``labels_``."""
+		"""Fit Cobweb on embeddings and expose ``labels_``."""
 		if torch.is_tensor(x):
 			x_tensor = x.to(self.device)
 			x_np = x_tensor.detach().cpu().numpy()
@@ -190,7 +190,7 @@ class BERTopicCobwebWrapper(CobwebWrapper):
 		return best_node_idxs, best_scores
 
 	def predict(self, x):
-		"""BERTopic cluster-model predict API."""
+		"""CobwebTM cluster-model predict API."""
 		labels, _ = self.predict_clusters(x)
 		return labels.detach().cpu().numpy()
 
@@ -205,15 +205,15 @@ def process_text(docs):
 	return processed_docs
 
 
-class BERTopicHierarchicalWrapper:
+class CobwebTMHierarchical:
 	"""Build a hierarchy dataframe compatible with hierarchical runner metrics."""
 
-	def __init__(self, docs, bertopic_model, linkage_function=None, cobweb_clusterer=None, topk=15):
+	def __init__(self, docs, model, linkage_function=None, cobweb_clusterer=None, topk=15):
 		self.topk = topk
 		if cobweb_clusterer is not None:
-			self._from_cobweb_clusterer(docs, cobweb_clusterer, bertopic_model)
+			self._from_cobweb_clusterer(docs, cobweb_clusterer, model)
 		else:
-			self._from_bertopic_hierarchical(docs, bertopic_model, linkage_function)
+			self._from_linkage_hierarchical(docs, model, linkage_function)
 
 	def _topk_words_from_row(self, row: csr_matrix, words):
 		counts = row.toarray().ravel()
@@ -230,33 +230,33 @@ class BERTopicHierarchicalWrapper:
 			indices_sorted = non_zero[top_idx][np.argsort(-counts[non_zero][top_idx])]
 		return [str(words[j]) for j in indices_sorted]
 
-	def _from_bertopic_hierarchical(self, docs, bertopic_model, linkage_function):
+	def _from_linkage_hierarchical(self, docs, model, linkage_function):
 		try:
-			words = bertopic_model.vectorizer_model.get_feature_names_out()
+			words = model.vectorizer_model.get_feature_names_out()
 		except Exception:
-			words = bertopic_model.vectorizer_model.get_feature_names()
+			words = model.vectorizer_model.get_feature_names()
 
 		documents = pd.DataFrame(
 			{
 				"Document": docs,
 				"ID": range(len(docs)),
-				"Topic": bertopic_model.topics_,
+				"Topic": model.topics_,
 			}
 		)
 		documents_per_topic = documents.groupby(["Topic"], as_index=False).agg({"Document": " ".join})
 		documents_per_topic = documents_per_topic.loc[documents_per_topic.Topic != -1, :]
 
-		clean_documents = process_text(bertopic_model._preprocess_text(documents_per_topic.Document.values))
-		bow = bertopic_model.vectorizer_model.transform(clean_documents)
+		clean_documents = process_text(model._preprocess_text(documents_per_topic.Document.values))
+		bow = model.vectorizer_model.transform(clean_documents)
 		topic_ids = [int(t) for t in documents_per_topic.Topic.values]
 
 		embeddings = select_topic_representation(
-			bertopic_model.c_tf_idf_,
-			bertopic_model.topic_embeddings_,
+			model.c_tf_idf_,
+			model.topic_embeddings_,
 			use_ctfidf=False,
 		)[0]
 		try:
-			outliers = int(getattr(bertopic_model, "_outliers", 0))
+			outliers = int(getattr(model, "_outliers", 0))
 		except Exception:
 			outliers = 0
 		embeddings = embeddings[outliers:]
@@ -346,16 +346,16 @@ class BERTopicHierarchicalWrapper:
 
 		self.hierachical_topics = pd.DataFrame(rows).sort_values(["Level", "Node_ID"]).reset_index(drop=True)
 
-	def _from_cobweb_clusterer(self, docs, cobweb_clusterer, bertopic_model):
+	def _from_cobweb_clusterer(self, docs, cobweb_clusterer, model):
 		doc_map, children_map = cobweb_clusterer._create_node_doc_assignment()
 
 		try:
-			words = bertopic_model.vectorizer_model.get_feature_names_out()
+			words = model.vectorizer_model.get_feature_names_out()
 		except Exception:
-			words = bertopic_model.vectorizer_model.get_feature_names()
+			words = model.vectorizer_model.get_feature_names()
 
-		clean_docs = process_text(bertopic_model._preprocess_text(docs))
-		bow_docs = bertopic_model.vectorizer_model.transform(clean_docs)
+		clean_docs = process_text(model._preprocess_text(docs))
+		bow_docs = model.vectorizer_model.transform(clean_docs)
 
 		adjacency = {}
 		node_ids = set()
@@ -406,3 +406,112 @@ class BERTopicHierarchicalWrapper:
 			)
 
 		self.hierachical_topics = pd.DataFrame(rows).sort_values(["Level", "Node_ID"]).reset_index(drop=True)
+
+
+class IncrementalCobwebTM:
+	"""Incremental Cobweb clustering wrapper for CobwebTM online workflows.
+
+	Supports ``partial_fit`` for streaming document batches. Automatically
+	selects the cluster depth using an adaptive leaf-ratio heuristic.
+	"""
+
+	def __init__(self, max_clusters=100, min_cluster_size=5, leaf_ratio=0.2):
+		self.max_clusters = max_clusters
+		self.min_cluster_size = min_cluster_size
+		self.leaf_ratio = leaf_ratio
+		self._inner = CobwebTM(cluster_level=-1, min_cluster_size=min_cluster_size)
+		self.labels_ = None
+
+	def _select_depth(self):
+		"""Choose the deepest level satisfying cluster/leaf constraints."""
+		_, level_counts, leaf_counts, _ = self._inner.tree.analyze_structure(verbose=True)
+		depth = 0
+		for level in level_counts.keys():
+			lc = leaf_counts.get(level, 0)
+			if (level_counts[level] - lc < self.max_clusters) and (lc / level_counts[level] <= self.leaf_ratio):
+				depth = level
+			else:
+				break
+		return depth
+
+	def partial_fit(self, X):
+		if torch.is_tensor(X):
+			x_tensor = X.to(self._inner.device)
+			x_np = x_tensor.detach().cpu().numpy()
+		else:
+			x_np = np.asarray(X)
+			x_tensor = torch.tensor(x_np, device=self._inner.device)
+
+		if self._inner.tree is None:
+			self._inner._init_tree_for_embeddings(x_np)
+
+		buffer_texts = [None] * len(x_tensor)
+		self._inner.add_sentences(buffer_texts, x_tensor)
+
+		depth = self._select_depth()
+		self._inner.cluster_level = depth
+		self._inner._cluster_index_valid = False
+		labels = self._inner._gather_clusters()
+
+		self.labels_ = labels[-len(X):].detach().cpu().numpy()
+		return self
+
+	def fit(self, X):
+		return self.partial_fit(X)
+
+	def predict(self, X):
+		labels, _ = self._inner.predict_clusters(X)
+		return labels.detach().cpu().numpy()
+
+
+class PersistentCobwebTM:
+	"""Stateful Cobweb wrapper that accumulates data across ``partial_fit`` calls.
+
+	Stores full ``labels_`` (all documents seen so far) after each update so
+	callers can track topic evolution over time.
+	"""
+
+	def __init__(self, max_clusters=100, min_cluster_size=5, leaf_ratio=0.2):
+		self.max_clusters = max_clusters
+		self.min_cluster_size = min_cluster_size
+		self.leaf_ratio = leaf_ratio
+		self._inner = CobwebTM(cluster_level=-1, min_cluster_size=min_cluster_size)
+		self.labels_ = None
+
+	def _select_depth(self):
+		_, level_counts, leaf_counts, _ = self._inner.tree.analyze_structure(verbose=True)
+		depth = 0
+		for level in level_counts.keys():
+			lc = leaf_counts.get(level, 0)
+			if (level_counts[level] - lc < self.max_clusters) and (lc / level_counts[level] <= self.leaf_ratio):
+				depth = level
+			else:
+				break
+		return depth
+
+	def partial_fit(self, X):
+		if torch.is_tensor(X):
+			x_tensor = X.to(self._inner.device)
+			x_np = x_tensor.detach().cpu().numpy()
+		else:
+			x_np = np.asarray(X)
+			x_tensor = torch.tensor(x_np, device=self._inner.device)
+
+		if self._inner.tree is None:
+			self._inner._init_tree_for_embeddings(x_np)
+
+		buffer_texts = [None] * len(x_tensor)
+		self._inner.add_sentences(buffer_texts, x_tensor)
+
+		depth = self._select_depth()
+		self._inner.cluster_level = depth
+		self._inner._cluster_index_valid = False
+		self.labels_ = self._inner._gather_clusters().detach().cpu().numpy()
+		return self
+
+	def fit(self, X):
+		return self.partial_fit(X)
+
+	def predict(self, X):
+		labels, _ = self._inner.predict_clusters(X)
+		return labels.detach().cpu().numpy()

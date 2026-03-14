@@ -1,14 +1,14 @@
-"""AG News dataset loader compatible with BERTopic experiments."""
+"""AG News dataset loader compatible with CobwebTM experiments."""
 
 from __future__ import annotations
 
 from typing import List, Optional
 
-from .bertopic_utils import BERTopicDataset
+from .cobwebtm_utils import CobwebTMDataset
 
 
-class AGNewsDataset(BERTopicDataset):
-    """Load AG News into a BERTopicDataset."""
+class AGNewsDataset(CobwebTMDataset):
+    """Load AG News into a CobwebTMDataset."""
 
     @classmethod
     def load(

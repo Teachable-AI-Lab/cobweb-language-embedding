@@ -1,14 +1,14 @@
-"""StackExchange / StackOverflow dataset loader compatible with BERTopic experiments."""
+"""StackExchange / StackOverflow dataset loader compatible with CobwebTM experiments."""
 
 from __future__ import annotations
 
 from typing import List, Optional
 
-from .bertopic_utils import BERTopicDataset
+from .cobwebtm_utils import CobwebTMDataset
 
 
-class StackExchangeDataset(BERTopicDataset):
-    """Load StackExchange posts into a BERTopicDataset."""
+class StackExchangeDataset(CobwebTMDataset):
+    """Load StackExchange posts into a CobwebTMDataset."""
 
     @classmethod
     def load(

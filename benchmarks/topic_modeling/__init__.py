@@ -1,12 +1,12 @@
 """Topic modeling benchmark package."""
 
 from .benchmark import BenchmarkRunner
-from .bertopic_utils import BERTopicDataset, BERTopicRunner
-from .hierarchical_utils import BERTopicHierarchicalRunner
+from .cobwebtm_utils import CobwebTMDataset, CobwebTMRunner
+from .hierarchical_utils import CobwebTMHierarchicalRunner
 
 __all__ = [
     "BenchmarkRunner",
-    "BERTopicDataset",
-    "BERTopicRunner",
-    "BERTopicHierarchicalRunner",
+    "CobwebTMDataset",
+    "CobwebTMRunner",
+    "CobwebTMHierarchicalRunner",
 ]
