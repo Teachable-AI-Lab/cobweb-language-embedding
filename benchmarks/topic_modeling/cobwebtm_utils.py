@@ -15,7 +15,7 @@ from gensim.corpora.dictionary import Dictionary
 from gensim.models.coherencemodel import CoherenceModel
 from sklearn.feature_extraction.text import CountVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.metrics import adjusted_rand_score, normalized_mutual_info_score
+from sklearn.metrics import adjusted_rand_score
 
 Batch = List[str]
 
@@ -427,7 +427,6 @@ class IncrementalCobwebTMRunner:
         current_topics = model.get_topics()
         topic_words = self._extract_topic_words(current_topics, top_n=self.top_n_words)
         coherence_cv = self._coherence(topic_words, tokens_all, corpus_all, measure="c_v")
-        coherence_cv_batch = self._coherence(topic_words, batch_tokens or [], batch_corpus or [], measure="c_v")
 
         # Try to obtain current labels for temporal stability metrics
         labels_curr = None
@@ -458,7 +457,6 @@ class IncrementalCobwebTMRunner:
 
         return {
             "coherence_c_v": coherence_cv,
-            "coherence_c_v_batch": coherence_cv_batch,
             "labels_curr": labels_curr,
             **stability,
         }
@@ -504,17 +502,14 @@ class IncrementalCobwebTMRunner:
                           model_name, step_idx):
         if not current_topics or prev_topics is None or not prev_topics:
             return {
-                "topic_stability_nmi": None,
                 "topic_stability_ari": None,
                 "topic_centroid_drift": None,
             }
 
-        nmi = None
         ari = None
         if labels_prev is not None and labels_curr is not None:
             min_len = min(len(labels_prev), len(labels_curr))
             if min_len > 0:
-                nmi = normalized_mutual_info_score(labels_prev[:min_len], labels_curr[:min_len])
                 ari = adjusted_rand_score(labels_prev[:min_len], labels_curr[:min_len])
 
         centroid_drift = None
@@ -534,7 +529,6 @@ class IncrementalCobwebTMRunner:
             pass
 
         return {
-            "topic_stability_nmi": float(nmi) if nmi is not None else None,
             "topic_stability_ari": float(ari) if ari is not None else None,
             "topic_centroid_drift": centroid_drift,
         }

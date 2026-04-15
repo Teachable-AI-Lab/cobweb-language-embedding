@@ -169,8 +169,6 @@ class IncrementalBenchmarkRunner:
 		tables_dir.mkdir(parents=True, exist_ok=True)
 		metrics = {
 			"coherence_c_v": "Topic coherence (c_v)",
-			"coherence_c_v_batch": "Batch topic coherence (c_v)",
-			"topic_stability_nmi": "Temporal stability (NMI)",
 			"topic_stability_ari": "Temporal stability (ARI)",
 			"topic_centroid_drift": "Topic centroid drift",
 		}
