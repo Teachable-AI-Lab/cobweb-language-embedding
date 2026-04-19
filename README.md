@@ -75,3 +75,23 @@ python -m benchmarks.topic_modeling.benchmark agnews --max-docs 1000 --top-n-wor
 ## License
 
 MIT (see `LICENSE`).
+
+## Citations
+
+If you use this repository, please cite the following papers:
+
+```
+@article{gupta2025hierarchical,
+  title={Hierarchical Semantic Retrieval with Cobweb},
+  author={Gupta, Anant and Singaravadivelan, Karthik and Wang, Zekun},
+  journal={arXiv preprint arXiv:2510.02539},
+  year={2025}
+}
+
+@article{singaravadivelan2026cobwebtm,
+  title={CobwebTM: Probabilistic Concept Formation for Lifelong and Hierarchical Topic Modeling},
+  author={Singaravadivelan, Karthik and Gupta, Anant and Wang, Zekun and MacLellan, Christopher},
+  journal={arXiv preprint arXiv:2604.14489},
+  year={2026}
+}
+```
